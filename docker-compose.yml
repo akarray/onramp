@@ -6,7 +6,7 @@ networks:
 
 services:
   traefik:
-    image: traefik:${TRAEFIK_DOCKER_TAG:-2.11} # replace with traefik:latest if you are feeling frisky
+    image: traefik:${TRAEFIK_DOCKER_TAG:-3.2} # replace with traefik:latest if you are feeling frisky
     container_name: ${TRAEFIK_CONTAINER_NAME:-traefik}
     restart: ${TRAEFIK_RESTART:-unless-stopped}
     mem_limit: ${TRAEFIK_MEM_LIMIT:-100m}
@@ -26,6 +26,7 @@ services:
       - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     command:
+      - --core.defaultRuleSyntax=v2
       - --api
       - --api.dashboard=${TRAEFIK_DASHBOARD_ENABLE:-true}
       - --log.level=${TRAEFIK_LOG_LEVEL:-ERROR}
@@ -59,6 +60,8 @@ services:
       - traefik.enable=true
       - traefik.http.routers.traefik.entrypoints=websecure
       - traefik.http.routers.traefik.service=api@internal
+      # Comment the if you want to use traefik v2 syntax in traefik v3
+      - traefik.http.routers.traefik.ruleSyntax=v2
       #- traefik.http.routers.traefik.rule=Host(`traefik.${HOST_DOMAIN}`)
       # comment the following three(3) lines if using the rule=Host line above
       - traefik.http.routers.traefik.rule=Host(`${HOST_NAME}.${HOST_DOMAIN}`)  && (PathPrefix(`/traefik`) || PathPrefix(`/api`))
