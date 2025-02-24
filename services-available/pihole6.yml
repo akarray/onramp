@@ -1,0 +1,89 @@
+networks:
+  pihole_internal:
+     ipam:
+       config:
+         - subnet: 172.70.9.0/29
+     name: pihole_internal
+  traefik:
+    external: true
+
+# description: Network-wide ad blocker and dns sinkhole
+# https://github.com/pi-hole/docker-pi-hole/blob/master/README.md
+# More info at https://github.com/pi-hole/docker-pi-hole/ and https://docs.pi-hole.net/
+
+services:
+  pihole6_cloudflared:
+    container_name: pihole6_cloudflared
+    # Restart on crashes and on reboots
+    restart: ${PIHOLE6_RESTART:-unless-stopped}
+    image: cloudflare/cloudflared:latest
+    command: proxy-dns
+    environment:
+      - "TUNNEL_DNS_UPSTREAM=https://1.1.1.1/dns-query,https://1.0.0.1/dns-query,https://9.9.9.9/dns-query,https://149.112.112.9/dns-query"
+
+      # Listen on an unprivileged port
+      - "TUNNEL_DNS_PORT=5053"
+
+      # Listen on all interfaces
+      - "TUNNEL_DNS_ADDRESS=0.0.0.0"
+
+    # Attach cloudflared only to the private network
+    networks:
+      pihole_internal:
+        ipv4_address: 172.70.9.2
+    security_opt:
+      - no-new-privileges:true
+
+  pihole6:
+    image: pihole/pihole:${PIHOLE6_DOCKER_TAG:-latest}
+    container_name: ${PIHOLE6_CONTAINER_NAME:-pihole6}
+    restart: ${PIHOLE6_RESTART:-unless-stopped}
+    depends_on:
+      - pihole6_cloudflared
+    networks:
+      pihole_internal:
+        ipv4_address: 172.70.9.3
+      traefik:
+
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+    #  - "67:67/udp" DHCP - uncomment if using it
+      - "500:80/tcp"
+    #  - "443:443/tcp"
+
+    volumes:
+      - ./etc/pihole6:/etc/pihole
+      - /etc/localtime:/etc/localtime:ro
+      - ./etc/pihole6/dnsmasq:/etc/dnsmasq.d
+
+    # Recommended but not required (DHCP needs NET_ADMIN)
+    #   https://github.com/pi-hole/docker-pi-hole#note-on-capabilities
+    #cap_add:
+    #  - NET_ADMIN
+
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ}
+
+      # Set a password to access the web interface. Not setting one will result in a random password being assigned
+      - FTLCONF_webserver_api_password=${PIHOLE6_WEBPASSWORD}
+      # If using Docker's default `bridge` network setting the dns listening mode should be set to 'all'3
+      - FTLCONF_dns_listeningMode='all' #SINGLE
+      #- FTLCONF_dns_interface=eth0
+      - FTLCONF_dns_upstreams='172.70.9.2#5053'
+
+    labels:
+      - joyride.host.name=${PIHOLE6_HOST_NAME:-pihole6}.${HOST_DOMAIN}
+      - traefik.enable=${PIHOLE6_TRAEFIK_ENABLED:-true}
+      - traefik.http.routers.pihole6.entrypoints=websecure
+      - traefik.http.routers.pihole6.rule=Host(`${PIHOLE6_HOST_NAME:-pihole6}.${HOST_DOMAIN}`)
+      #- traefik.http.services.pihole6.loadbalancer.server.scheme=https # enable if the service wants to connect over https
+      - traefik.http.services.pihole6.loadbalancer.server.port=80
+      - traefik.http.middlewares.pihole6redirect.redirectregex.regex=^https?://${PIHOLE6_CONTAINER_NAME:-pihole6}.${HOST_DOMAIN}/$$
+      - traefik.http.middlewares.pihole6redirect.redirectregex.replacement=http://${PIHOLE6_CONTAINER_NAME:-pihole6}.${HOST_DOMAIN}/admin/
+      - traefik.http.routers.pihole6.middlewares=pihole6redirect
+      - traefik.docker.network=traefik
+      - autoheal=${PIHOLE6_AUTOHEAL_ENABLED:-true}
+      - com.centurylinklabs.watchtower.enable=${PIHOLE6_WATCHTOWER_ENABLED:-true}
